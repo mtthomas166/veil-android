@@ -399,6 +399,42 @@ class AppSpacing {
 class AppTheme {
   AppTheme._();
 
+  /// Border color of the D-pad / keyboard focus ring used across the app.
+  static const Color focusRingColor = AppColors.purpleC50;
+
+  /// Focus ring side reused by every button theme so TV focus is always
+  /// visible no matter which button variant a screen uses.
+  static const BorderSide focusRingSide = BorderSide(
+    color: focusRingColor,
+    width: 2,
+  );
+
+  /// Overlay tint painted on focused controls (buttons, ink wells).
+  static Color get focusOverlayColor =>
+      AppColors.purpleC200.withValues(alpha: 0.32);
+
+  /// [WidgetStateProperty] that shows the focus ring only while focused,
+  /// falling back to [base] (or nothing) otherwise.
+  static WidgetStateProperty<BorderSide?> _focusAwareSide({BorderSide? base}) {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+      if (states.contains(WidgetState.focused)) {
+        return focusRingSide;
+      }
+      return base;
+    });
+  }
+
+  /// [WidgetStateProperty] overlay: strong purple when focused, [base] for
+  /// hover/press feedback otherwise.
+  static WidgetStateProperty<Color?> _focusAwareOverlay(Color base) {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+      if (states.contains(WidgetState.focused)) {
+        return focusOverlayColor;
+      }
+      return base;
+    });
+  }
+
   static ThemeData dark() {
     final base = ThemeData(useMaterial3: true, brightness: Brightness.dark);
     final textTheme = AppTextStyles.textTheme(base.textTheme);
@@ -422,7 +458,10 @@ class AppTheme {
       cardColor: AppColors.modalBackground,
       dividerColor: AppColors.utilsDivider,
       disabledColor: AppColors.buttonsToggleDisabled,
-      focusColor: AppColors.dropdownHighlight,
+      // Focus tint for InkWell/ListTile-based rows (settings, sheets, cards
+      // without a custom ring). Purple keeps D-pad focus on-brand — the old
+      // yellow dropdownHighlight looked broken on TV.
+      focusColor: AppColors.purpleC600.withValues(alpha: 0.55),
       hintColor: AppColors.searchPlaceholder,
       hoverColor: AppColors.searchHoverBackground,
       highlightColor: AppColors.mediaCardHoverBackground,
@@ -531,9 +570,8 @@ class AppTheme {
           foregroundColor: const WidgetStatePropertyAll(
             AppColors.buttonsPrimaryText,
           ),
-          overlayColor: const WidgetStatePropertyAll(
-            AppColors.buttonsPrimaryHover,
-          ),
+          overlayColor: _focusAwareOverlay(AppColors.buttonsPrimaryHover),
+          side: _focusAwareSide(),
           textStyle: WidgetStatePropertyAll(textTheme.labelLarge),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(
@@ -548,6 +586,12 @@ class AppTheme {
           ),
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: ButtonStyle(
+          overlayColor: _focusAwareOverlay(AppColors.buttonsPurpleHover),
+          side: _focusAwareSide(),
+        ),
+      ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: ButtonStyle(
           backgroundColor: const WidgetStatePropertyAll(
@@ -556,11 +600,9 @@ class AppTheme {
           foregroundColor: const WidgetStatePropertyAll(
             AppColors.buttonsSecondaryText,
           ),
-          overlayColor: const WidgetStatePropertyAll(
-            AppColors.buttonsSecondaryHover,
-          ),
-          side: const WidgetStatePropertyAll(
-            BorderSide(color: AppColors.dropdownBorder),
+          overlayColor: _focusAwareOverlay(AppColors.buttonsSecondaryHover),
+          side: _focusAwareSide(
+            base: const BorderSide(color: AppColors.dropdownBorder),
           ),
           textStyle: WidgetStatePropertyAll(textTheme.labelLarge),
           padding: const WidgetStatePropertyAll(
@@ -579,9 +621,8 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: ButtonStyle(
           foregroundColor: const WidgetStatePropertyAll(AppColors.typeLink),
-          overlayColor: const WidgetStatePropertyAll(
-            AppColors.searchHoverBackground,
-          ),
+          overlayColor: _focusAwareOverlay(AppColors.searchHoverBackground),
+          side: _focusAwareSide(),
           textStyle: WidgetStatePropertyAll(textTheme.labelLarge),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(
@@ -589,6 +630,24 @@ class AppTheme {
               vertical: AppSpacing.x2,
             ),
           ),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: ButtonStyle(
+          overlayColor:
+              WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+            if (states.contains(WidgetState.focused)) {
+              return focusOverlayColor;
+            }
+            if (states.contains(WidgetState.pressed)) {
+              return AppColors.white.withValues(alpha: 0.12);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return AppColors.white.withValues(alpha: 0.08);
+            }
+            return null;
+          }),
+          side: _focusAwareSide(),
         ),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
@@ -607,7 +666,14 @@ class AppTheme {
         secondaryLabelStyle: textTheme.labelMedium?.copyWith(
           color: AppColors.typeEmphasis,
         ),
-        side: const BorderSide(color: AppColors.dropdownBorder),
+        // Focus-aware border so the Live/Sports filter chips show a clear
+        // D-pad focus ring on TV.
+        side: WidgetStateBorderSide.resolveWith((Set<WidgetState> states) {
+          if (states.contains(WidgetState.focused)) {
+            return focusRingSide;
+          }
+          return const BorderSide(color: AppColors.dropdownBorder);
+        }),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: AppColors.backgroundSecondary,

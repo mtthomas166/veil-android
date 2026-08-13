@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import 'package:pstream_android/config/device_profile.dart';
+
 enum WindowClass { compact, medium, expanded }
 
 enum HandsetDensity { small, regular, large }
@@ -19,6 +21,11 @@ WindowClass windowClass(BuildContext context) {
 }
 
 int gridCols(BuildContext context) {
+  // 10-foot UI: more, smaller tiles read better and keep D-pad travel short.
+  if (DeviceProfile.isTv) {
+    return 5;
+  }
+
   switch (windowClass(context)) {
     case WindowClass.compact:
       return 2;
@@ -29,8 +36,10 @@ int gridCols(BuildContext context) {
   }
 }
 
+/// True only on real leanback (Android TV / Google TV) devices. Wide tablets
+/// stay tablets — use [windowClass] for size-based layout decisions.
 bool isTV(BuildContext context) {
-  return windowClass(context) == WindowClass.expanded;
+  return DeviceProfile.isTv;
 }
 
 HandsetDensity handsetDensity(BuildContext context) {

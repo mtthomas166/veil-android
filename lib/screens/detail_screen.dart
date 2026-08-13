@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pstream_android/config/app_theme.dart';
 import 'package:pstream_android/config/breakpoints.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/providers/storage_provider.dart';
 import 'package:pstream_android/providers/tmdb_provider.dart';
@@ -154,6 +155,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> {
               child: const Text('Start Over'),
             ),
             FilledButton(
+              autofocus: DeviceProfile.isTv,
               onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Resume'),
             ),
@@ -566,6 +568,9 @@ class _DetailBody extends StatelessWidget {
                   foregroundColor: AppColors.typeEmphasis,
                   minimumSize: const Size.fromHeight(AppSpacing.x12),
                 ),
+                // On TV, land D-pad focus straight on Play when the page
+                // opens — the primary action is one select-press away.
+                autofocus: DeviceProfile.isTv,
                 onPressed: isLoading ? null : onPlay,
                 icon: const Icon(Icons.play_arrow_rounded),
                 label: const Text('Play'),
@@ -597,29 +602,36 @@ class _DetailBody extends StatelessWidget {
             )
             .fadeIn(duration: 380.ms),
         const SizedBox(height: AppSpacing.x4),
-        GestureDetector(
-          onTap: onToggleOverview,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                media.overview.isEmpty
-                    ? 'No overview available.'
-                    : media.overview,
-                maxLines: overviewExpanded ? null : 3,
-                overflow: overviewExpanded ? null : TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: AppColors.typeText),
-              ),
-              const SizedBox(height: AppSpacing.x2),
-              Text(
-                overviewExpanded ? 'Show less' : 'Tap to expand',
-                style: Theme.of(
-                  context,
-                ).textTheme.labelMedium?.copyWith(color: AppColors.typeLink),
-              ),
-            ],
+        // InkWell (not GestureDetector) so the overview toggle is reachable
+        // and activatable with a D-pad / keyboard as well as touch.
+        Material(
+          color: AppColors.transparent,
+          borderRadius: BorderRadius.circular(AppSpacing.x3),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppSpacing.x3),
+            onTap: onToggleOverview,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  media.overview.isEmpty
+                      ? 'No overview available.'
+                      : media.overview,
+                  maxLines: overviewExpanded ? null : 3,
+                  overflow: overviewExpanded ? null : TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: AppColors.typeText),
+                ),
+                const SizedBox(height: AppSpacing.x2),
+                Text(
+                  overviewExpanded ? 'Show less' : 'Tap to expand',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: AppColors.typeLink),
+                ),
+              ],
+            ),
           ),
         ),
         if (media.credits.isNotEmpty) ...<Widget>[

@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pstream_android/config/app_config.dart';
 import 'package:pstream_android/config/app_theme.dart';
 import 'package:pstream_android/config/breakpoints.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/providers/tmdb_provider.dart';
 import 'package:pstream_android/widgets/media_card.dart';
@@ -41,7 +43,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       _query = initialQuery;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && initialQuery.isEmpty) {
+      // On TV, grabbing focus here would pop the on-screen keyboard the
+      // moment the tab opens; let the user D-pad to the field instead.
+      if (mounted && initialQuery.isEmpty && !DeviceProfile.isTv) {
         _focusNode.requestFocus();
       }
     });
@@ -144,7 +148,29 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     ),
                     const SizedBox(width: AppSpacing.x2),
                     Expanded(
-                      child: TextField(
+                      child: Focus(
+                        // Listener only — the TextField's own node handles
+                        // focus; this wrapper must not add a traversal stop.
+                        canRequestFocus: false,
+                        skipTraversal: true,
+                        // TV: D-pad select on the focused field must summon
+                        // the on-screen keyboard (touch taps do this
+                        // implicitly; remotes don't).
+                        onKeyEvent: (FocusNode node, KeyEvent event) {
+                          if (!DeviceProfile.isTv || event is KeyUpEvent) {
+                            return KeyEventResult.ignored;
+                          }
+                          final LogicalKeyboardKey key = event.logicalKey;
+                          if (key == LogicalKeyboardKey.select ||
+                              key == LogicalKeyboardKey.enter) {
+                            _focusNode.requestFocus();
+                            SystemChannels.textInput
+                                .invokeMethod<void>('TextInput.show');
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: TextField(
                         controller: _controller,
                         focusNode: _focusNode,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -173,6 +199,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                             vertical: AppSpacing.x3,
                           ),
                         ),
+                      ),
                       ),
                     ),
                     if (hasQuery)
@@ -260,11 +287,7 @@ class _SearchResultsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int columns = switch (windowClass(context)) {
-      WindowClass.compact => 2,
-      WindowClass.medium => 3,
-      WindowClass.expanded => 4,
-    };
+    final int columns = gridCols(context);
 
     final int itemCount = isLoading ? columns * 3 : items.length;
 

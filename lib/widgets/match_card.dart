@@ -2,12 +2,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:pstream_android/config/app_theme.dart';
 import 'package:pstream_android/models/sports_match.dart';
+import 'package:pstream_android/widgets/focus_ring.dart';
 
 /// Grid tile for a single sports match.
 ///
 /// Shows the event poster (or a team-badge fallback), a sport chip, a `● LIVE`
 /// badge when the match is live, the title, and the kickoff time / status.
-class MatchCard extends StatelessWidget {
+class MatchCard extends StatefulWidget {
   const MatchCard({
     super.key,
     required this.match,
@@ -20,14 +21,29 @@ class MatchCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<MatchCard> createState() => _MatchCardState();
+}
+
+class _MatchCardState extends State<MatchCard> {
+  bool _focused = false;
+
+  SportsMatch get match => widget.match;
+  bool get isLive => widget.isLive;
+
+  @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
-      child: Material(
+      child: FocusRing(
+        focused: _focused,
+        scale: 1.03,
+        child: Material(
         color: AppColors.glassSheet,
         borderRadius: BorderRadius.circular(AppSpacing.x4),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onTap,
+          onTap: widget.onTap,
+          focusColor: AppColors.transparent,
+          onFocusChange: (bool value) => setState(() => _focused = value),
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppSpacing.x4),
@@ -79,6 +95,7 @@ class MatchCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

@@ -121,7 +121,9 @@ sequenceDiagram
 
 Flutter · Riverpod · go_router · Hive · video_player (ExoPlayer) · flutter_inappwebview · TMDB · cinepro-org/core (OMSS v1.0) · veil-streamed-sports
 
-Adaptive shell: bottom nav with Home · Search · My list · Live TV · Sports · Settings (`windowClass` breakpoints for grid density).
+Adaptive shell: Home · Search · My list · Live TV · Sports · Settings — glass bottom dock on phones, side rail on tablets and Android TV (`windowClass` breakpoints for grid density).
+
+**Android TV / Google TV:** the app declares leanback support (shows up in the TV launcher) and is fully D-pad navigable — focus rings on cards and nav, remote-driven player controls (select shows controls, left/right seeks, media keys work), and TV-safe overscan padding. Real TVs are detected via `UiModeManager` (leanback), so wide tablets keep tablet behavior.
 
 ---
 
