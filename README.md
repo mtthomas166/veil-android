@@ -13,7 +13,7 @@
   &nbsp;
   <img src="https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter&logoColor=white" alt="Flutter" />
   &nbsp;
-  <img src="https://img.shields.io/badge/release-3.0.0-7C3AED?style=flat-square&labelColor=1a1a2e" alt="Version" />
+  <a href="https://github.com/dikshadamahe/veil-android/releases/latest"><img src="https://img.shields.io/github/v/release/dikshadamahe/veil-android?style=flat-square&color=7C3AED&labelColor=1a1a2e" alt="Latest release" /></a>
 </p>
 
 ---
@@ -275,3 +275,7 @@ base64 -w0 upload-keystore.jks   # paste into ANDROID_KEYSTORE_BASE64
 ## Disclaimer
 
 Veil is a **metadata and playback orchestration** tool. You are responsible for backend configuration, provider and TMDB terms, and compliance with applicable law.
+
+---
+
+Built and maintained by [@dikshadamahe](https://github.com/dikshadamahe) and [@pracheersrivastava](https://github.com/pracheersrivastava).
