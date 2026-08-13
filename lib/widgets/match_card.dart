@@ -182,6 +182,14 @@ class _TeamBadge extends StatelessWidget {
             width: AppSpacing.x10,
             height: AppSpacing.x10,
             fit: BoxFit.contain,
+            // Decode at the fixed display size so many small badges don't each
+            // hold a full-resolution bitmap in memory.
+            memCacheWidth:
+                (AppSpacing.x10 * MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+            memCacheHeight:
+                (AppSpacing.x10 * MediaQuery.devicePixelRatioOf(context))
+                    .round(),
             placeholder: (BuildContext context, String url) =>
                 const SizedBox(width: AppSpacing.x10, height: AppSpacing.x10),
             errorWidget: (BuildContext context, String url, Object error) =>

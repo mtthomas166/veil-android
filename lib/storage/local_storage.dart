@@ -20,7 +20,6 @@ class LocalStorage {
   static const String prefKeySubtitleColor = 'pref_subtitle_color';
   static const String prefKeySubtitleBgOpacity = 'pref_subtitle_bg_opacity';
   static const String prefKeyDoubleTapSeekSecs = 'pref_double_tap_seek_secs';
-  static const String prefKeyHardwareAcceleration = 'pref_hardware_acceleration';
   static const String prefKeyLastUpdateCheckAt = 'pref_last_update_check_at';
   static const String prefKeyDismissedUpdateVersionCode =
       'pref_dismissed_update_version_code';
@@ -365,17 +364,6 @@ class LocalStorage {
         ? value
         : doubleTapSeekDefaultSecs;
     await _prefsBox.put(prefKeyDoubleTapSeekSecs, safe);
-  }
-
-  /// Whether hardware decoding/acceleration is enabled for video playback.
-  /// Defaults to false for first-run stability on HEVC/H.265 streams.
-  static bool getHardwareAccelerationEnabled() {
-    final dynamic raw = _prefsBox.get(prefKeyHardwareAcceleration);
-    return raw is bool ? raw : false;
-  }
-
-  static Future<void> setHardwareAccelerationEnabled(bool value) async {
-    await _prefsBox.put(prefKeyHardwareAcceleration, value);
   }
 
   /// Last successful in-app update check (UTC ISO-8601).

@@ -114,11 +114,6 @@ final doubleTapSeekSecsPrefProvider = Provider<int>((Ref ref) {
   return LocalStorage.getDoubleTapSeekSecs();
 });
 
-final hardwareAccelerationPrefProvider = Provider<bool>((Ref ref) {
-  ref.watch(storageRevisionProvider);
-  return LocalStorage.getHardwareAccelerationEnabled();
-});
-
 final storageControllerProvider = Provider<StorageController>((Ref ref) {
   return StorageController(ref);
 });
@@ -178,11 +173,6 @@ class StorageController {
 
   Future<void> setDoubleTapSeekSecs(int value) async {
     await LocalStorage.setDoubleTapSeekSecs(value);
-    _refresh();
-  }
-
-  Future<void> setHardwareAccelerationEnabled(bool value) async {
-    await LocalStorage.setHardwareAccelerationEnabled(value);
     _refresh();
   }
 

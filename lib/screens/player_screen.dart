@@ -171,8 +171,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   /// Parsed subtitle entries from the active caption file.
   List<Caption> _parsedCaptions = const <Caption>[];
-  /// Current subtitle text to display, updated every position tick.
-  String _currentSubtitleText = '';
+  /// Current subtitle line. A [ValueNotifier] so caption changes (~4×/s during
+  /// dialogue) repaint only the caption widget via a [ValueListenableBuilder]
+  /// instead of calling setState on the whole player tree.
+  final ValueNotifier<String> _currentSubtitleText = ValueNotifier<String>('');
   Timer? _controlsHideTimer;
 
   /// TV: captures D-pad + media keys while the controls are hidden. Marked
@@ -290,6 +292,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   /// Guards re-entrant auto-fallback while a fallback reload is in flight.
   bool _autoFallbackInProgress = false;
+
+  /// Consecutive auto-fallback hops without a successful frame. Capped so a
+  /// title with many dead proxy URLs shows the error card instead of churning
+  /// through every source. Reset once a source actually renders.
+  int _autoFallbackAttempts = 0;
+  static const int _maxAutoFallbackAttempts = 6;
 
   /// True once [_activeSource] / [_omssResponse] have been assigned (they are
   /// `late`). Guards the embed/live getters so they are safe to read before
@@ -568,7 +576,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _debugPlayer('dispose.begin');
     WidgetsBinding.instance.removeObserver(this);
     // Capture before subscriptions/player tear-down so async persist does not
-    // read mpv state after [Player.dispose] (race that dropped progress).
+    // read player state after controller disposal (race that dropped progress).
     final bool snapEmbed = _isEmbedMode;
     final int snapPos =
         snapEmbed ? _xpassPosition.round() : _position.inSeconds;
@@ -591,6 +599,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _gestureHintTimer?.cancel();
     _videoStallTimer?.cancel();
     _playerSettingsLabelRev.dispose();
+    _currentSubtitleText.dispose();
     _tvRemoteFocusNode.dispose();
     _playPauseFocusNode.dispose();
     unawaited(_restoreScreenBrightness());
@@ -812,17 +821,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       });
 
       if (mounted) {
+        _currentSubtitleText.value = '';
         setState(() {
           _parsedCaptions = parsed.captions;
-          _currentSubtitleText = '';
         });
       }
     } catch (e) {
       _debugPlayer('subtitle.parse_error', <String, Object?>{'error': '$e'});
       if (mounted) {
+        _currentSubtitleText.value = '';
         setState(() {
           _parsedCaptions = const <Caption>[];
-          _currentSubtitleText = '';
         });
       }
     }
@@ -831,7 +840,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// Clear active subtitles.
   void _clearParsedSubtitles() {
     _parsedCaptions = const <Caption>[];
-    _currentSubtitleText = '';
+    _currentSubtitleText.value = '';
   }
 
   /// Find the caption entry matching the current playback position.
@@ -1103,8 +1112,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // per-controller in _openStream via _onControllerUpdate.
   }
 
-  /// Unified listener for [VideoPlayerController.addListener]. Replaces the
-  /// individual stream subscriptions that media_kit used.
+  /// Unified listener for [VideoPlayerController.addListener]. Coalesces
+  /// position/duration/buffer/playing/error updates into one callback.
   void _onControllerUpdate() {
     if (!mounted || _controller == null) {
       return;
@@ -1172,15 +1181,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _debugPlayer('stream.firstVideoFrame', <String, Object?>{
         'width': v.size.width.toInt(),
       });
+      // A source rendered successfully — reset the fallback budget so a later
+      // mid-playback blip can still hop through sources again.
+      _autoFallbackAttempts = 0;
       setState(() { _hasFirstVideoFrame = true; });
     }
 
-    // Subtitle text tracking
+    // Subtitle text tracking. Push to the ValueNotifier only — the
+    // ValueListenableBuilder in build() repaints just the caption, avoiding a
+    // full-tree setState several times per second during dialogue.
     if (_subtitlesEnabled && _parsedCaptions.isNotEmpty) {
       final String newText = _captionForPosition(v.position);
-      if (newText != _currentSubtitleText) {
-        setState(() { _currentSubtitleText = newText; });
+      if (newText != _currentSubtitleText.value) {
+        _currentSubtitleText.value = newText;
       }
+    } else if (_currentSubtitleText.value.isNotEmpty) {
+      _currentSubtitleText.value = '';
     }
 
     // Error
@@ -1283,7 +1299,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final StreamPlayback playback = _activeStreamResult.stream;
     final String? url = _selectedQualityUrl ?? _resolvePlayableUrl(playback);
     // cinepro sets Referer / Origin / User-Agent server-side on the proxy URL.
-    // The app passes no headers; libmpv opens the URL as-is.
+    // The app passes no headers; ExoPlayer opens the URL as-is.
     const Map<String, String> headers = <String, String>{};
 
     if (url == null || url.isEmpty) {
@@ -1534,7 +1550,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       return;
     }
 
-    // Skip the seek until libmpv has loaded the duration — otherwise the
+    // Skip the seek until ExoPlayer has loaded the duration — otherwise the
     // request is dropped and playback restarts from 00:00.
     if (_duration.inMilliseconds <= 0) {
       return;
@@ -1589,6 +1605,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     _wasBackgrounded = false;
+
+    // Prefer resuming the existing controller in place. A full reopen on every
+    // task-switch reinitializes ExoPlayer (2–3s black screen, can drop the HLS
+    // live edge), so only fall back to that when the controller is gone or in
+    // an error state. Embeds keep their own resume path via _openStream.
+    final VideoPlayerController? c = _controller;
+    if (!_isEmbedMode &&
+        c != null &&
+        c.value.isInitialized &&
+        !c.value.hasError) {
+      try {
+        await c.play();
+        if (mounted) {
+          setState(() {});
+          _debugPlayer('recover.resumed_in_place');
+        }
+        return;
+      } catch (error) {
+        _debugPlayer('recover.resume_failed', <String, Object?>{
+          'error': '$error',
+        });
+        // Fall through to a full reopen below.
+      }
+    }
+
     _resumeApplied = false;
     await _openStream(resumeFrom: _position.inSeconds);
     if (mounted) {
@@ -1660,6 +1701,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _debugPlayer('fallback.exhausted');
       return false;
     }
+    if (_autoFallbackAttempts >= _maxAutoFallbackAttempts) {
+      _debugPlayer('fallback.attempts_capped', <String, Object?>{
+        'attempts': _autoFallbackAttempts,
+      });
+      return false;
+    }
+    _autoFallbackAttempts++;
     _autoFallbackInProgress = true;
     unawaited(_runAutoFallback(next));
     return true;
@@ -1688,6 +1736,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _hasFirstVideoFrame = false;
       _hwdecFallbackAttempted = false;
     });
+    // Let the user know we're auto-switching rather than silently spinning.
+    _flashGestureHint(
+      icon: Icons.swap_horiz_rounded,
+      label: 'Trying ${target.providerName}…',
+    );
     _playerSettingsLabelRev.value++;
     await _openStream(resumeFrom: resumeFrom > 0 ? resumeFrom : null);
     _autoFallbackInProgress = false;
@@ -3730,7 +3783,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       ),
                     ),
                   ),
-                if (_subtitlesEnabled && _currentSubtitleText.isNotEmpty && _playerReady)
+                if (_subtitlesEnabled && _playerReady)
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 200),
                     curve: Curves.easeOut,
@@ -3741,39 +3794,50 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         : AppSpacing.x6,
                     child: IgnorePointer(
                       child: RepaintBoundary(
-                        child: Container(
-                          alignment: Alignment.center,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.x3,
-                              vertical: AppSpacing.x1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(
-                                alpha: ref.watch(subtitleBgOpacityPrefProvider),
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              _currentSubtitleText,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _hexToColorPlayer(
-                                  ref.watch(subtitleColorPrefProvider),
+                        child: ValueListenableBuilder<String>(
+                          valueListenable: _currentSubtitleText,
+                          builder: (BuildContext context, String text, _) {
+                            if (text.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+                            return Container(
+                              alignment: Alignment.center,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.x3,
+                                  vertical: AppSpacing.x1,
                                 ),
-                                fontSize: ref.watch(subtitleSizePrefProvider).toDouble(),
-                                fontWeight: FontWeight.w600,
-                                height: 1.4,
-                                shadows: const <Shadow>[
-                                  Shadow(
-                                    color: Colors.black,
-                                    blurRadius: 3,
-                                    offset: Offset(0, 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(
+                                    alpha:
+                                        ref.watch(subtitleBgOpacityPrefProvider),
                                   ),
-                                ],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  text,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: _hexToColorPlayer(
+                                      ref.watch(subtitleColorPrefProvider),
+                                    ),
+                                    fontSize: ref
+                                        .watch(subtitleSizePrefProvider)
+                                        .toDouble(),
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.4,
+                                    shadows: const <Shadow>[
+                                      Shadow(
+                                        color: Colors.black,
+                                        blurRadius: 3,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                          },
                         ),
                       ),
                     ),

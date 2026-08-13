@@ -57,6 +57,10 @@ patch-xprime-finger.sh
 vidsrc_extractor_architecture_guide.html
 IMPLEMENTATION_BRIEF.md
 CUsersPracheer*
+# Scratch API/HTTP dumps occasionally written to the repo root during testing
+/rel*.json
+/runs*.json
+/vj.json
 
 # Added by code-review-graph
 .code-review-graph/

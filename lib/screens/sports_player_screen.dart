@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:pstream_android/config/app_theme.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/match_stream.dart';
 import 'package:pstream_android/models/sports_match.dart';
 import 'package:pstream_android/providers/sports_provider.dart';
@@ -185,7 +186,12 @@ class _SportsPlayerScreenState extends ConsumerState<SportsPlayerScreen> {
       fit: StackFit.expand,
       children: <Widget>[
         GestureDetector(
-          onTap: () => setState(() => _overlayVisible = !_overlayVisible),
+          // On TV the WebView captures D-pad keys, so a center-press must not
+          // be able to hide the overlay (there would be no way to summon it
+          // back). The overlay stays pinned on TV; tap-to-toggle is phone-only.
+          onTap: DeviceProfile.isTv
+              ? null
+              : () => setState(() => _overlayVisible = !_overlayVisible),
           child: SportsEmbedView(
             key: ValueKey<String>(stream.embedUrl),
             url: stream.embedUrl,
@@ -206,7 +212,7 @@ class _SportsPlayerScreenState extends ConsumerState<SportsPlayerScreen> {
           const IgnorePointer(
             child: Center(child: CircularProgressIndicator()),
           ),
-        if (_overlayVisible) _buildTopOverlay(stream),
+        if (_overlayVisible || DeviceProfile.isTv) _buildTopOverlay(stream),
       ],
     );
   }
@@ -237,6 +243,9 @@ class _SportsPlayerScreenState extends ConsumerState<SportsPlayerScreen> {
             child: Row(
               children: <Widget>[
                 IconButton(
+                  // Autofocus on TV so the D-pad always has a reachable target
+                  // above the focus-hungry WebView.
+                  autofocus: DeviceProfile.isTv,
                   icon: const Icon(Icons.arrow_back_rounded),
                   color: AppColors.typeEmphasis,
                   onPressed: () => Navigator.of(context).maybePop(),
