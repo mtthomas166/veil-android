@@ -263,6 +263,11 @@ iframe[src*="googlesyndication" i],
   }
 
   /// Settings that make popup interception reliable on Android WebView.
+  ///
+  /// Local-file and cross-origin file access are explicitly disabled so a
+  /// hostile third-party embed cannot pivot into `file://` and read app-private
+  /// storage. Mixed content is limited to compatibility mode (needed by some
+  /// HTTPS players that pull HTTP segments) rather than always-allow.
   static InAppWebViewSettings embedSettings({
     String? userAgent,
     bool transparentBackground = true,
@@ -280,6 +285,12 @@ iframe[src*="googlesyndication" i],
       useShouldOverrideUrlLoading: true,
       supportZoom: false,
       transparentBackground: transparentBackground,
+      // Lock down local-file access — embeds have no business touching disk.
+      allowFileAccess: false,
+      allowContentAccess: false,
+      allowFileAccessFromFileURLs: false,
+      allowUniversalAccessFromFileURLs: false,
+      mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
       contentBlockers: contentBlockers,
     );
   }
@@ -306,7 +317,11 @@ iframe[src*="googlesyndication" i],
   }) {
     final Uri? requestUrl = action.request.url?.uriValue;
     if (requestUrl == null) {
-      return NavigationActionPolicy.ALLOW;
+      // No URL to vet. Refuse an opaque main-frame navigation; leave
+      // subframes alone so media elements are not disturbed.
+      return action.isForMainFrame
+          ? NavigationActionPolicy.CANCEL
+          : NavigationActionPolicy.ALLOW;
     }
 
     if (isBlockedUrl(requestUrl)) {
@@ -318,10 +333,21 @@ iframe[src*="googlesyndication" i],
       return NavigationActionPolicy.ALLOW;
     }
 
+    // Main frame must be a real web navigation. Blocks a hostile embed from
+    // pivoting the top frame into file://, content://, intent://, data:, or
+    // javascript: — the local-storage / app-scheme escape surface.
+    final String scheme = requestUrl.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') {
+      return NavigationActionPolicy.CANCEL;
+    }
+
     // Main frame: stay on the embed host (allow http↔https and path changes).
     final String requestHost = requestUrl.host.toLowerCase();
+    if (requestHost.isEmpty) {
+      return NavigationActionPolicy.CANCEL;
+    }
     final String embedHost = embedOrigin.host.toLowerCase();
-    if (requestHost.isEmpty || embedHost.isEmpty) {
+    if (embedHost.isEmpty) {
       return NavigationActionPolicy.ALLOW;
     }
     if (requestHost == embedHost ||

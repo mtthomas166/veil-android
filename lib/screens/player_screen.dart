@@ -204,7 +204,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// Subtitles card must listen here to pick up [_currentSubtitleLabel].
   final ValueNotifier<int> _playerSettingsLabelRev = ValueNotifier<int>(0);
 
-  /// Software volume (0–150 after [applyNativePlaybackTune] raises `volume-max`).
+  /// Player volume as a 0–100 percentage. ExoPlayer (video_player) clamps to
+  /// unity gain, so 100 is the real maximum — there is no software boost above
+  /// it on the current playback stack.
   double _softwareVolume = 100;
   double _screenBrightness = 0.55;
   bool _screenBrightnessPrimed = false;
@@ -1357,8 +1359,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         formatHint: formatHint,
       );
 
-      await _controller!.initialize();
+      // Bound initialization: a dead proxy/CDN can otherwise leave `initialize`
+      // pending forever, stranding the UI on "Loading stream…" with no error
+      // and no fallback. A timeout throws into the catch below, which triggers
+      // auto-fallback to the next source.
+      await _controller!.initialize().timeout(const Duration(seconds: 25));
       if (!mounted) {
+        // Route was popped mid-initialize. Dispose the orphan so we don't leak
+        // a native ExoPlayer instance.
+        final VideoPlayerController? orphan = _controller;
+        _controller = null;
+        await orphan?.dispose();
         return;
       }
       _controller!.addListener(_onControllerUpdate);
@@ -2975,9 +2986,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     if (_edgeSwipe == _PlayerEdgeSwipe.volume) {
       final double next =
-          (_edgeSwipeStartVolume + (-_edgeSwipeAccumDy / travel) * 150).clamp(
+          (_edgeSwipeStartVolume + (-_edgeSwipeAccumDy / travel) * 100).clamp(
             0,
-            150,
+            100,
           );
       if ((next - _softwareVolume).abs() < 0.5) {
         return;
@@ -3161,10 +3172,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         ),
                       ),
                       child: Slider(
-                        value: _softwareVolume.clamp(0, 150),
+                        value: _softwareVolume.clamp(0, 100),
                         min: 0,
-                        max: 150,
-                        divisions: 30,
+                        max: 100,
+                        divisions: 20,
                         label: '${_softwareVolume.round()}',
                         onChanged: (double value) {
                           setModal(() {

@@ -113,7 +113,7 @@ GET {ORACLE_URL}/v1/tv/{tmdbId}/seasons/{s}/episodes/{e}
 
 The app:
 1. Renders the `sources[]` in a "Sources" sheet (each row's name comes from `source.provider.name`).
-2. Picks the first `sources[0]` by default and hands `source.url` to `media_kit` via `Media(url, httpHeaders: {})`.
+2. Picks the first `sources[0]` by default and opens `source.url` via **`video_player`** (`VideoPlayerController.networkUrl`, with `formatHint` from OMSS `source.type`).
 3. Sends `source.url` to the player; no extra headers, no `Referer`, no `Origin`.
 4. Loads any `subtitles[]` URLs that match a language the user enables.
 

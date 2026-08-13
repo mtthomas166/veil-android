@@ -142,21 +142,33 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/sports-player',
       builder: (BuildContext context, GoRouterState state) {
-        final SportsMatch match = state.extra! as SportsMatch;
-        return SportsPlayerScreen(match: match);
+        // `extra` is null on a cold deep link / process restore — fall back to
+        // Home instead of crashing on a bad cast.
+        final Object? extra = state.extra;
+        if (extra is! SportsMatch) {
+          return const HomeScreen();
+        }
+        return SportsPlayerScreen(match: extra);
       },
     ),
     GoRoute(
       path: '/detail/:id',
       builder: (BuildContext context, GoRouterState state) {
-        final MediaItem mediaItem = state.extra! as MediaItem;
-        return DetailScreen(mediaItem: mediaItem);
+        final Object? extra = state.extra;
+        if (extra is! MediaItem) {
+          return const HomeScreen();
+        }
+        return DetailScreen(mediaItem: extra);
       },
     ),
     GoRoute(
       path: '/player',
       builder: (BuildContext context, GoRouterState state) {
-        final PlayerScreenArgs args = state.extra! as PlayerScreenArgs;
+        final Object? extra = state.extra;
+        if (extra is! PlayerScreenArgs) {
+          return const HomeScreen();
+        }
+        final PlayerScreenArgs args = extra;
 
         // Keep one player *session* per playing unit, but also include the
         // replace epoch so a source switch can force a clean transition
