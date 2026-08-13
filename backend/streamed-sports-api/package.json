@@ -1,8 +1,8 @@
 {
   "name": "veil-streamed-sports",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "Thin cached proxy for streamed.pk sports API — isolated from cinepro/OMSS",
+  "description": "Cached multi-upstream sports proxy (streamed.pk + StreamFree + WatchFooty + CDN Live TV) — isolated from cinepro/OMSS",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

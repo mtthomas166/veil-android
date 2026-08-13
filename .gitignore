@@ -29,6 +29,7 @@ ssh-key-*.pub
 *.iml
 .codex/.env
 *.keystore
+*.jks
 key.properties
 .dart_tool/
 build/
@@ -38,6 +39,24 @@ node_modules/
 .pnpm-store/
 backend/**/.env
 docs/agents/**
+
+# Legacy providers stack — not deployed, and it carries hardcoded third-party
+# API keys / scraper creds that must not stay in a public repo.
+backend/providers-lib/
+
+# Local agent tooling / scratch — never publish
+work done by openclaude/
+.agents/
+.kilocode/
+skills-lock.json
+/package.json
+/package-lock.json
+android/.kotlin/
+api.js(*).js
+patch-xprime-finger.sh
+vidsrc_extractor_architecture_guide.html
+IMPLEMENTATION_BRIEF.md
+CUsersPracheer*
 
 # Added by code-review-graph
 .code-review-graph/

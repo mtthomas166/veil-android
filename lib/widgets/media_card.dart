@@ -9,6 +9,7 @@ import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/providers/storage_provider.dart';
 import 'package:pstream_android/screens/detail_screen.dart';
 import 'package:pstream_android/screens/player_screen.dart';
+import 'package:pstream_android/widgets/focus_ring.dart';
 import 'package:shimmer/shimmer.dart';
 
 /// What happens when [MediaCard] is tapped. [detail] (default) opens the
@@ -16,21 +17,53 @@ import 'package:shimmer/shimmer.dart';
 /// scrape/play flow with the saved resume position.
 enum MediaCardBehavior { detail, continueWatching }
 
-class MediaCard extends ConsumerWidget {
+class MediaCard extends ConsumerStatefulWidget {
   const MediaCard({
     super.key,
     required this.mediaItem,
     this.posterSize = 'w342',
     this.behavior = MediaCardBehavior.detail,
+    this.autofocus = false,
   });
 
   final MediaItem mediaItem;
   final String posterSize;
   final MediaCardBehavior behavior;
 
+  /// Give this card initial D-pad focus when its screen appears (TV).
+  final bool autofocus;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final _MediaCardSize size = _cardSize(context);
+  ConsumerState<MediaCard> createState() => _MediaCardState();
+
+  static const double _titleAreaHeight = AppSpacing.x0;
+
+  static double cardHeightFor(BuildContext context) {
+    return _cardSize(context).height;
+  }
+
+  static _MediaCardSize _cardSize(BuildContext context) {
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double width = switch (windowClass(context)) {
+      WindowClass.compact => screenWidth * 0.34,
+      WindowClass.medium => screenWidth * 0.22,
+      WindowClass.expanded => screenWidth * 0.16,
+    };
+    return _MediaCardSize(width, width * _posterAspectHeight);
+  }
+
+  static const double _posterAspectHeight = 1.5;
+}
+
+class _MediaCardState extends ConsumerState<MediaCard> {
+  /// True while the card holds keyboard / D-pad focus (drives [FocusRing]).
+  bool _focused = false;
+
+  MediaItem get mediaItem => widget.mediaItem;
+
+  @override
+  Widget build(BuildContext context) {
+    final _MediaCardSize size = MediaCard._cardSize(context);
 
     // For TV, show & progress live at the episode level. Look up the latest
     // episode the user touched, then use that episode's progress so the
@@ -58,9 +91,11 @@ class MediaCard extends ConsumerWidget {
     return RepaintBoundary(
       child: SizedBox(
         width: size.width,
-        height: size.height + _titleAreaHeight,
+        height: size.height + MediaCard._titleAreaHeight,
         child: _TapScaleWrapper(
-          child: DecoratedBox(
+          child: FocusRing(
+            focused: _focused,
+            child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppSpacing.x4),
               boxShadow: <BoxShadow>[
@@ -79,13 +114,16 @@ class MediaCard extends ConsumerWidget {
             highlightColor: AppColors.mediaCardHoverBackground.withValues(
               alpha: 0.35,
             ),
+            focusColor: AppColors.transparent,
+            autofocus: widget.autofocus,
+            onFocusChange: (bool value) => setState(() => _focused = value),
             onTap: () async {
               await HapticFeedback.lightImpact();
               if (!context.mounted) {
                 return;
               }
 
-              if (behavior == MediaCardBehavior.continueWatching) {
+              if (widget.behavior == MediaCardBehavior.continueWatching) {
                 _continueWatchingTap(context, ref, latestEpisode, progress);
                 return;
               }
@@ -117,7 +155,8 @@ class MediaCard extends ConsumerWidget {
                             child: mediaItem.posterUrl() == null
                                 ? const _MediaCardPosterPlaceholder()
                                 : CachedNetworkImage(
-                                    imageUrl: mediaItem.posterUrl(posterSize)!,
+                                    imageUrl:
+                                        mediaItem.posterUrl(widget.posterSize)!,
                                     fit: BoxFit.cover,
                                     placeholder: (_, placeholderUrl) =>
                                         const _MediaCardPosterPlaceholder(),
@@ -222,6 +261,7 @@ class MediaCard extends ConsumerWidget {
       ),
       ),
     ),
+    ),
     );
   }
 
@@ -259,24 +299,6 @@ class MediaCard extends ConsumerWidget {
       ),
     );
   }
-
-  static const double _titleAreaHeight = AppSpacing.x0;
-
-  static double cardHeightFor(BuildContext context) {
-    return _cardSize(context).height;
-  }
-
-  static _MediaCardSize _cardSize(BuildContext context) {
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final double width = switch (windowClass(context)) {
-      WindowClass.compact => screenWidth * 0.34,
-      WindowClass.medium => screenWidth * 0.22,
-      WindowClass.expanded => screenWidth * 0.16,
-    };
-    return _MediaCardSize(width, width * _posterAspectHeight);
-  }
-
-  static const double _posterAspectHeight = 1.5;
 }
 
 double _progressRatio(Map<String, dynamic>? progress) {

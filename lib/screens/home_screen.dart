@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 import 'package:pstream_android/config/app_config.dart';
 import 'package:pstream_android/config/app_theme.dart';
 import 'package:pstream_android/config/breakpoints.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/providers/storage_provider.dart';
 import 'package:pstream_android/providers/tmdb_provider.dart';
 import 'package:pstream_android/widgets/category_row.dart';
+import 'package:pstream_android/widgets/focus_ring.dart';
 import 'package:pstream_android/widgets/media_card.dart';
 
 enum _HomeCatalogFilter { all, movies, tv }
@@ -310,6 +312,9 @@ class _HomeCategoryChips extends StatelessWidget {
             borderRadius: BorderRadius.circular(21),
             child: InkWell(
               borderRadius: BorderRadius.circular(21),
+              // Cold-start focus anchor on TV: the chip strip is always
+              // present, so the first D-pad press has somewhere to go.
+              autofocus: DeviceProfile.isTv && index == 0,
               onTap: () => onSelected(opt.value),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
@@ -449,10 +454,19 @@ class _HomeHeroCarouselState extends State<_HomeHeroCarousel> {
   }
 }
 
-class _HomeHeroSlide extends StatelessWidget {
+class _HomeHeroSlide extends StatefulWidget {
   const _HomeHeroSlide({required this.media});
 
   final MediaItem media;
+
+  @override
+  State<_HomeHeroSlide> createState() => _HomeHeroSlideState();
+}
+
+class _HomeHeroSlideState extends State<_HomeHeroSlide> {
+  bool _focused = false;
+
+  MediaItem get media => widget.media;
 
   @override
   Widget build(BuildContext context) {
@@ -462,7 +476,11 @@ class _HomeHeroSlide extends StatelessWidget {
         : null;
     final String yearLabel = media.year > 0 ? '${media.year}' : '—';
 
-    return Stack(
+    return FocusRing(
+      focused: _focused,
+      scale: 1.0,
+      borderRadius: BorderRadius.circular(AppSpacing.x5),
+      child: Stack(
       fit: StackFit.expand,
       children: <Widget>[
         ColoredBox(
@@ -538,7 +556,22 @@ class _HomeHeroSlide extends StatelessWidget {
             ],
           ),
         ),
+        // Tap / D-pad select opens the featured title. Sits on top of the
+        // artwork so the ripple isn't hidden behind the opaque image.
+        Positioned.fill(
+          child: Material(
+            color: AppColors.transparent,
+            child: InkWell(
+              focusColor: AppColors.transparent,
+              onFocusChange: (bool value) => setState(() => _focused = value),
+              onTap: () {
+                context.push('/detail/${media.tmdbId}', extra: media);
+              },
+            ),
+          ),
+        ),
       ],
+      ),
     );
   }
 }

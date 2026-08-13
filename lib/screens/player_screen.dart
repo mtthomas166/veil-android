@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pstream_android/config/app_config.dart';
 import 'package:pstream_android/config/breakpoints.dart';
 import 'package:pstream_android/config/app_theme.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/external_subtitle_offer.dart';
 import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/models/episode.dart';
@@ -173,6 +174,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// Current subtitle text to display, updated every position tick.
   String _currentSubtitleText = '';
   Timer? _controlsHideTimer;
+
+  /// TV: captures D-pad + media keys while the controls are hidden. Marked
+  /// [FocusNode.skipTraversal] so it never competes with the visible control
+  /// buttons during directional traversal.
+  final FocusNode _tvRemoteFocusNode = FocusNode(
+    debugLabel: 'PlayerRemote',
+    skipTraversal: true,
+  );
+
+  /// TV: focus target for the play/pause button whenever the controls are
+  /// summoned with the remote.
+  final FocusNode _playPauseFocusNode = FocusNode(
+    debugLabel: 'PlayerPlayPause',
+  );
+
+  /// One-shot latch so the first ready build on TV parks focus correctly.
+  bool _tvFocusPrimed = false;
   Timer? _progressTimer;
   String? _subtitleToast;
   Timer? _subtitleToastTimer;
@@ -186,7 +204,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// Subtitles card must listen here to pick up [_currentSubtitleLabel].
   final ValueNotifier<int> _playerSettingsLabelRev = ValueNotifier<int>(0);
 
-  /// Software volume (0–150 after [applyNativePlaybackTune] raises `volume-max`).
+  /// Player volume as a 0–100 percentage. ExoPlayer (video_player) clamps to
+  /// unity gain, so 100 is the real maximum — there is no software boost above
+  /// it on the current playback stack.
   double _softwareVolume = 100;
   double _screenBrightness = 0.55;
   bool _screenBrightnessPrimed = false;
@@ -571,6 +591,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _gestureHintTimer?.cancel();
     _videoStallTimer?.cancel();
     _playerSettingsLabelRev.dispose();
+    _tvRemoteFocusNode.dispose();
+    _playPauseFocusNode.dispose();
     unawaited(_restoreScreenBrightness());
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(
@@ -1017,6 +1039,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _controlsVisible = false;
     });
     _controlsHideTimer?.cancel();
+    _onControlsHidden();
   }
 
   void _unlockControls() {
@@ -1025,6 +1048,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _controlsVisible = true;
     });
     _armControlsHideTimer();
+    _focusPlayPauseSoon();
   }
 
   @override
@@ -1335,8 +1359,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         formatHint: formatHint,
       );
 
-      await _controller!.initialize();
+      // Bound initialization: a dead proxy/CDN can otherwise leave `initialize`
+      // pending forever, stranding the UI on "Loading stream…" with no error
+      // and no fallback. A timeout throws into the catch below, which triggers
+      // auto-fallback to the next source.
+      await _controller!.initialize().timeout(const Duration(seconds: 25));
       if (!mounted) {
+        // Route was popped mid-initialize. Dispose the orphan so we don't leak
+        // a native ExoPlayer instance.
+        final VideoPlayerController? orphan = _controller;
+        _controller = null;
+        await orphan?.dispose();
         return;
       }
       _controller!.addListener(_onControllerUpdate);
@@ -1734,8 +1767,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (!mounted) {
       return;
     }
+    // Pop directly (not maybePop): the explicit Back button must exit even on
+    // TV, where the PopScope intercepts system back to dismiss controls first.
     final NavigatorState navigator = Navigator.of(context);
-    await navigator.maybePop();
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
   }
 
   Future<void> _seekRelative(int seconds, {bool showControls = true}) async {
@@ -1793,7 +1830,126 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       setState(() {
         _controlsVisible = false;
       });
+      _onControlsHidden();
     });
+  }
+
+  /// TV: whenever the controls hide, park focus back on the root remote node
+  /// so the next D-pad press is captured here (the control buttons are
+  /// excluded from focus while invisible).
+  void _onControlsHidden() {
+    if (DeviceProfile.isTv) {
+      _tvRemoteFocusNode.requestFocus();
+    }
+  }
+
+  /// TV: move D-pad focus onto play/pause once the controls are on screen.
+  void _focusPlayPauseSoon() {
+    if (!DeviceProfile.isTv) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          _controlsVisible &&
+          !_controlsLocked &&
+          _playPauseFocusNode.context != null) {
+        _playPauseFocusNode.requestFocus();
+      }
+    });
+  }
+
+  /// Remote / keyboard transport handling for the whole player surface.
+  ///
+  /// - Media keys (play/pause/rewind/fast-forward) always work.
+  /// - TV with controls hidden: select/up/down summon the controls,
+  ///   left/right seek ±10s.
+  /// - TV with controls visible: while the hidden-controls seek left focus on
+  ///   the root node, left/right keep seeking; any key press re-arms the
+  ///   auto-hide timer, and unhandled keys fall through to normal
+  ///   directional traversal between the control buttons.
+  KeyEventResult _handleRemoteKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) {
+      return KeyEventResult.ignored;
+    }
+    final LogicalKeyboardKey key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.mediaPlayPause ||
+        key == LogicalKeyboardKey.mediaPlay ||
+        key == LogicalKeyboardKey.mediaPause ||
+        key == LogicalKeyboardKey.space) {
+      unawaited(_togglePlayback());
+      return KeyEventResult.handled;
+    }
+    if (!_isLive && key == LogicalKeyboardKey.mediaRewind) {
+      unawaited(_seekRelative(-10));
+      return KeyEventResult.handled;
+    }
+    if (!_isLive && key == LogicalKeyboardKey.mediaFastForward) {
+      unawaited(_seekRelative(10));
+      return KeyEventResult.handled;
+    }
+
+    if (!DeviceProfile.isTv) {
+      return KeyEventResult.ignored;
+    }
+
+    if (_controlsLocked) {
+      // The unlock pill is tiny for a 10-foot UI — let select unlock too.
+      if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter) {
+        _unlockControls();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    final bool seekable = !_isLive && _playerReady;
+
+    if (_controlsVisible) {
+      // Controls summoned by a hidden-controls seek keep focus on this root
+      // node — keep seeking on left/right for continuous scrubbing.
+      if (node.hasPrimaryFocus) {
+        if (seekable && key == LogicalKeyboardKey.arrowLeft) {
+          unawaited(_seekRelative(-10));
+          return KeyEventResult.handled;
+        }
+        if (seekable && key == LogicalKeyboardKey.arrowRight) {
+          unawaited(_seekRelative(10));
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.select ||
+            key == LogicalKeyboardKey.enter ||
+            key == LogicalKeyboardKey.arrowUp ||
+            key == LogicalKeyboardKey.arrowDown) {
+          _focusPlayPauseSoon();
+          _armControlsHideTimer();
+          return KeyEventResult.handled;
+        }
+      }
+      // A button owns focus: let traversal/activation do its thing, but
+      // keep the auto-hide timer from firing mid-navigation.
+      _armControlsHideTimer();
+      return KeyEventResult.ignored;
+    }
+
+    // Controls hidden: the remote drives playback directly.
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown) {
+      _showControls();
+      _focusPlayPauseSoon();
+      return KeyEventResult.handled;
+    }
+    if (seekable && key == LogicalKeyboardKey.arrowLeft) {
+      unawaited(_seekRelative(-10));
+      return KeyEventResult.handled;
+    }
+    if (seekable && key == LogicalKeyboardKey.arrowRight) {
+      unawaited(_seekRelative(10));
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _notifyPlayerSettingsSubtitleLabel() {
@@ -2673,6 +2829,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _armControlsHideTimer();
     } else {
       _controlsHideTimer?.cancel();
+      _onControlsHidden();
     }
   }
 
@@ -2829,9 +2986,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     if (_edgeSwipe == _PlayerEdgeSwipe.volume) {
       final double next =
-          (_edgeSwipeStartVolume + (-_edgeSwipeAccumDy / travel) * 150).clamp(
+          (_edgeSwipeStartVolume + (-_edgeSwipeAccumDy / travel) * 100).clamp(
             0,
-            150,
+            100,
           );
       if ((next - _softwareVolume).abs() < 0.5) {
         return;
@@ -3015,10 +3172,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         ),
                       ),
                       child: Slider(
-                        value: _softwareVolume.clamp(0, 150),
+                        value: _softwareVolume.clamp(0, 100),
                         min: 0,
-                        max: 150,
-                        divisions: 30,
+                        max: 100,
+                        divisions: 20,
                         label: '${_softwareVolume.round()}',
                         onChanged: (double value) {
                           setModal(() {
@@ -3204,6 +3361,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             left: AppSpacing.x2,
             child: SafeArea(
               child: IconButton(
+                // TV: give the gate a focus anchor so back / try-again are
+                // reachable with the remote right away.
+                autofocus: DeviceProfile.isTv,
                 onPressed: () => Navigator.of(context).maybePop(),
                 icon: const Icon(Icons.arrow_back_rounded),
                 color: AppColors.typeEmphasis,
@@ -3304,11 +3464,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // reach the embed instead of toggling our (hidden) native controls.
     final bool embed = _activeSourceIsEmbed;
 
+    // TV: park initial focus once the player surface is up — play/pause when
+    // the controls are showing, otherwise the root remote node.
+    if (DeviceProfile.isTv && !_tvFocusPrimed) {
+      _tvFocusPrimed = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        if (_controlsVisible &&
+            !_controlsLocked &&
+            _playPauseFocusNode.context != null) {
+          _playPauseFocusNode.requestFocus();
+        } else {
+          _tvRemoteFocusNode.requestFocus();
+        }
+      });
+    }
+
     return PopScope(
-      canPop: true,
+      // TV: back dismisses the visible controls first; pressing back again
+      // exits playback. Everywhere else back exits immediately.
+      canPop: !DeviceProfile.isTv ||
+          !_playerReady ||
+          _controlsLocked ||
+          !_controlsVisible,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) {
+          return;
+        }
+        setState(() {
+          _controlsVisible = false;
+        });
+        _controlsHideTimer?.cancel();
+        _onControlsHidden();
+      },
       child: Scaffold(
         backgroundColor: AppColors.blackC50,
-        body: GestureDetector(
+        body: Focus(
+          focusNode: _tvRemoteFocusNode,
+          onKeyEvent: _handleRemoteKey,
+          child: GestureDetector(
           behavior: embed
               ? HitTestBehavior.deferToChild
               : HitTestBehavior.opaque,
@@ -3503,7 +3699,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   _buildEmbedTopOverlay(context, title)
                 else
                   SafeArea(
-                    child: PlayerControls(
+                    // Invisible controls must not trap D-pad focus: exclude
+                    // the whole subtree while hidden or locked.
+                    child: ExcludeFocus(
+                      excluding: !_controlsVisible || _controlsLocked,
+                      child: PlayerControls(
                     visible: _controlsVisible && !_controlsLocked,
                     mediaTitle: title,
                     isPlaying: _playing,
@@ -3514,6 +3714,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     liveProgramTitle: widget.args.liveCurrentProgram,
                     showNextEpisode: _shouldShowNextEpisode,
                     nextEpisodeLabel: _nextEpisodeTarget?.label,
+                    playPauseFocusNode: _playPauseFocusNode,
                     onBack: _exitPlayer,
                     onPlayPause: _togglePlayback,
                     onSeekBack: () => _seekRelative(-10),
@@ -3526,6 +3727,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     onToggleAutoRotate: _toggleAutoRotate,
                     onLock: _lockControls,
                     onNextEpisode: _playNextEpisode,
+                      ),
                     ),
                   ),
                 if (_subtitlesEnabled && _currentSubtitleText.isNotEmpty && _playerReady)
@@ -3586,6 +3788,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   ),
               ],
             ),
+          ),
         ),
       ),
     );

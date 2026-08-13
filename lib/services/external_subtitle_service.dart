@@ -171,14 +171,16 @@ class ExternalSubtitleService {
       return;
     }
 
-    final http.Response response = await http.post(
-      _osBase.resolve('login'),
-      headers: _opensubtitlesHeaders(includeBearer: false),
-      body: jsonEncode(<String, String>{
-        'username': AppConfig.opensubtitlesUsername,
-        'password': AppConfig.opensubtitlesPassword,
-      }),
-    );
+    final http.Response response = await http
+        .post(
+          _osBase.resolve('login'),
+          headers: _opensubtitlesHeaders(includeBearer: false),
+          body: jsonEncode(<String, String>{
+            'username': AppConfig.opensubtitlesUsername,
+            'password': AppConfig.opensubtitlesPassword,
+          }),
+        )
+        .timeout(const Duration(seconds: 25));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       _osBearer = null;

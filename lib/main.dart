@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:pstream_android/config/app_theme.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/config/router.dart';
 import 'package:pstream_android/providers/app_update_provider.dart';
 import 'package:pstream_android/providers/storage_provider.dart';
@@ -14,6 +15,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await LocalStorage.init();
+  await DeviceProfile.init();
+
+  if (DeviceProfile.isTv) {
+    // On TV every interaction is remote-driven: always render focus
+    // highlights instead of waiting for the first key event to switch the
+    // focus manager out of touch mode.
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
+  }
+
   runApp(const ProviderScope(child: VeilApp()));
 }
 

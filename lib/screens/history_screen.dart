@@ -12,11 +12,7 @@ class HistoryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final List<MediaItem> history = ref.watch(historyProvider);
-    final int columns = switch (windowClass(context)) {
-      WindowClass.compact => 2,
-      WindowClass.medium => 3,
-      WindowClass.expanded => 4,
-    };
+    final int columns = gridCols(context);
 
     return Scaffold(
       backgroundColor: AppColors.backgroundMain,

@@ -2,12 +2,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:pstream_android/config/app_theme.dart';
 import 'package:pstream_android/models/live_channel.dart';
+import 'package:pstream_android/widgets/focus_ring.dart';
 
 /// Grid tile for a single Live TV channel.
 ///
 /// Shows the channel logo, a category chip, the channel name, and — when EPG
 /// data is available — a `● LIVE` badge with the current program title.
-class ChannelCard extends StatelessWidget {
+class ChannelCard extends StatefulWidget {
   const ChannelCard({
     super.key,
     required this.channel,
@@ -22,14 +23,29 @@ class ChannelCard extends StatelessWidget {
   final String? currentProgram;
 
   @override
+  State<ChannelCard> createState() => _ChannelCardState();
+}
+
+class _ChannelCardState extends State<ChannelCard> {
+  bool _focused = false;
+
+  LiveChannel get channel => widget.channel;
+  String? get currentProgram => widget.currentProgram;
+
+  @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
-      child: Material(
+      child: FocusRing(
+        focused: _focused,
+        scale: 1.03,
+        child: Material(
         color: AppColors.glassSheet,
         borderRadius: BorderRadius.circular(AppSpacing.x4),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onTap,
+          onTap: widget.onTap,
+          focusColor: AppColors.transparent,
+          onFocusChange: (bool value) => setState(() => _focused = value),
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppSpacing.x4),
@@ -109,6 +125,7 @@ class ChannelCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

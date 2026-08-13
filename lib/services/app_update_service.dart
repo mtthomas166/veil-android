@@ -18,6 +18,34 @@ class AppUpdateService {
 
   static const Duration defaultCheckInterval = Duration(hours: 24);
 
+  /// Network timeouts so a stalled host can never hang the launch check or the
+  /// Settings screen.
+  static const Duration _metadataTimeout = Duration(seconds: 20);
+  static const Duration _downloadTimeout = Duration(minutes: 10);
+
+  /// Hosts an update APK is allowed to be downloaded from. Anything else is
+  /// refused before a byte is fetched, so a tampered manifest or a stray
+  /// `UPDATE_MANIFEST_URL` cannot point users at an arbitrary APK.
+  static const Set<String> _allowedApkHosts = <String>{
+    'github.com',
+    'objects.githubusercontent.com',
+    'release-assets.githubusercontent.com',
+    'raw.githubusercontent.com',
+  };
+
+  /// True only for `https://` URLs whose host is in [_allowedApkHosts]
+  /// (exact match or subdomain).
+  static bool _isAllowedApkUrl(String rawUrl) {
+    final Uri? uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null || uri.scheme.toLowerCase() != 'https') {
+      return false;
+    }
+    final String host = uri.host.toLowerCase();
+    return _allowedApkHosts.any(
+      (String allowed) => host == allowed || host.endsWith('.$allowed'),
+    );
+  }
+
   Future<PackageInfo> installedPackageInfo() => PackageInfo.fromPlatform();
 
   Future<int> installedVersionCode() async {
@@ -70,7 +98,7 @@ class AppUpdateService {
         'Accept': 'application/json',
         'User-Agent': 'Veil-Android-Updater',
       },
-    );
+    ).timeout(_metadataTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
         'Update manifest HTTP ${response.statusCode}: ${response.body}',
@@ -101,7 +129,7 @@ class AppUpdateService {
         'User-Agent': 'Veil-Android-Updater',
         'X-GitHub-Api-Version': '2022-11-28',
       },
-    );
+    ).timeout(_metadataTimeout);
     if (response.statusCode == 404) {
       return null;
     }
@@ -183,6 +211,23 @@ class AppUpdateService {
       throw StateError('Update APK URL is empty');
     }
 
+    // Fail closed: only download signed GitHub release assets over HTTPS, and
+    // only when the release published a SHA-256 to verify against. This stops
+    // a tampered manifest or a redirected asset from installing a foreign APK.
+    if (!_isAllowedApkUrl(update.apkUrl)) {
+      throw StateError(
+        'Refusing update: APK URL is not an allowed HTTPS GitHub host '
+        '(${update.apkUrl}).',
+      );
+    }
+    final String? expectedSha = update.sha256?.trim();
+    if (expectedSha == null || expectedSha.isEmpty) {
+      throw StateError(
+        'Refusing update: release did not publish a SHA-256 checksum to '
+        'verify the APK against.',
+      );
+    }
+
     final Directory base = await getTemporaryDirectory();
     final Directory dir = Directory('${base.path}/updates');
     if (!await dir.exists()) {
@@ -195,7 +240,8 @@ class AppUpdateService {
 
     final http.Request request = http.Request('GET', Uri.parse(update.apkUrl));
     request.headers['User-Agent'] = 'Veil-Android-Updater';
-    final http.StreamedResponse response = await _client.send(request);
+    final http.StreamedResponse response =
+        await _client.send(request).timeout(_metadataTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('APK download HTTP ${response.statusCode}');
     }
@@ -203,25 +249,31 @@ class AppUpdateService {
     final int? total = response.contentLength;
     int received = 0;
     final IOSink sink = apkFile.openWrite();
-    await for (final List<int> chunk in response.stream) {
-      sink.add(chunk);
-      received += chunk.length;
-      if (total != null && total > 0) {
-        onProgress?.call(received / total);
-      }
+    try {
+      await response.stream
+          .timeout(_downloadTimeout)
+          .forEach((List<int> chunk) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total != null && total > 0) {
+          onProgress?.call(received / total);
+        }
+      });
+    } finally {
+      await sink.close();
     }
-    await sink.close();
     onProgress?.call(1);
 
-    if (update.sha256 != null && update.sha256!.trim().isNotEmpty) {
-      final Digest digest = await sha256.bind(apkFile.openRead()).first;
-      final String actual = digest.toString();
-      if (actual.toLowerCase() != update.sha256!.trim().toLowerCase()) {
-        await apkFile.delete();
-        throw StateError(
-          'APK checksum mismatch (expected ${update.sha256}, got $actual)',
-        );
-      }
+    // SHA-256 is mandatory (guarded above) — a mismatch means the bytes were
+    // tampered with in transit or at rest, so refuse to hand it to the
+    // package installer.
+    final Digest digest = await sha256.bind(apkFile.openRead()).first;
+    final String actual = digest.toString();
+    if (actual.toLowerCase() != expectedSha.toLowerCase()) {
+      await apkFile.delete();
+      throw StateError(
+        'APK checksum mismatch (expected $expectedSha, got $actual)',
+      );
     }
 
     final OpenResult result = await OpenFilex.open(

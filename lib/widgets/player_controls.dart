@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pstream_android/config/breakpoints.dart';
 import 'package:pstream_android/config/app_theme.dart';
 
@@ -30,6 +31,7 @@ class PlayerControls extends StatelessWidget {
     this.nextEpisodeLabel,
     this.isLive = false,
     this.liveProgramTitle,
+    this.playPauseFocusNode,
   });
 
   final bool visible;
@@ -62,6 +64,10 @@ class PlayerControls extends StatelessWidget {
   final VoidCallback onLock;
   final Future<void> Function() onNextEpisode;
   final String? nextEpisodeLabel;
+
+  /// TV: lets the player land D-pad focus on play/pause when the controls
+  /// are summoned with the remote.
+  final FocusNode? playPauseFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +141,7 @@ class PlayerControls extends StatelessWidget {
                             backgroundColor: AppColors.buttonsPurple,
                             minimumSize: Size.square(metrics.playButtonSize),
                           ),
+                          focusNode: playPauseFocusNode,
                           onPressed: () {
                             onPlayPause();
                           },
@@ -374,6 +381,31 @@ class _SeekBarState extends State<_SeekBar> {
   bool _isDragging = false;
   double _dragFraction = 0;
 
+  /// True while the bar holds D-pad / keyboard focus (TV scrubbing).
+  bool _focused = false;
+
+  /// D-pad left/right on a focused seek bar scrubs ±10s. Up/down are left
+  /// unhandled so traversal can move to the other control clusters.
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) {
+      return KeyEventResult.ignored;
+    }
+    final LogicalKeyboardKey key = event.logicalKey;
+    final bool back = key == LogicalKeyboardKey.arrowLeft;
+    final bool forward = key == LogicalKeyboardKey.arrowRight;
+    if (!back && !forward) {
+      return KeyEventResult.ignored;
+    }
+
+    final double totalMs = widget.duration.inMilliseconds.toDouble();
+    if (totalMs <= 0) {
+      return KeyEventResult.handled;
+    }
+    final double targetMs = widget.position.inMilliseconds + (back ? -10000 : 10000);
+    widget.onSeek((targetMs / totalMs).clamp(0, 1).toDouble());
+    return KeyEventResult.handled;
+  }
+
   double get _playedFraction {
     final double totalMs = widget.duration.inMilliseconds.toDouble();
     if (totalMs <= 0) {
@@ -399,7 +431,10 @@ class _SeekBarState extends State<_SeekBar> {
     final double displayFraction = _displayFraction;
 
     return RepaintBoundary(
-      child: LayoutBuilder(
+      child: Focus(
+        onFocusChange: (bool value) => setState(() => _focused = value),
+        onKeyEvent: _handleKeyEvent,
+        child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -449,7 +484,7 @@ class _SeekBarState extends State<_SeekBar> {
                       height: metrics.seekTrackHeight,
                       decoration: BoxDecoration(
                         color: AppColors.progressBackground.withValues(
-                          alpha: 0.35,
+                          alpha: _focused ? 0.55 : 0.35,
                         ),
                         borderRadius:
                             BorderRadius.circular(metrics.trackRadius),
@@ -487,7 +522,13 @@ class _SeekBarState extends State<_SeekBar> {
                         decoration: BoxDecoration(
                           color: AppColors.progressFilled,
                           shape: BoxShape.circle,
-                          boxShadow: _isDragging
+                          border: _focused
+                              ? Border.all(
+                                  color: AppTheme.focusRingColor,
+                                  width: 2,
+                                )
+                              : null,
+                          boxShadow: _isDragging || _focused
                               ? <BoxShadow>[
                                   BoxShadow(
                                     color:
@@ -507,6 +548,7 @@ class _SeekBarState extends State<_SeekBar> {
             ),
           );
         },
+        ),
       ),
     );
   }

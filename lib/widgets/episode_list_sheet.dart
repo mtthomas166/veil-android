@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pstream_android/config/app_theme.dart';
+import 'package:pstream_android/config/device_profile.dart';
 import 'package:pstream_android/models/episode.dart';
 import 'package:pstream_android/models/media_item.dart';
 import 'package:pstream_android/models/season.dart';
@@ -184,6 +185,9 @@ class _EpisodeListSheetState extends ConsumerState<EpisodeListSheet>
                             episode: episode,
                             progress: progress,
                             isCurrent: isCurrent,
+                            // Land D-pad focus on the first row so the sheet
+                            // is immediately navigable on TV.
+                            autofocus: DeviceProfile.isTv && index == 0,
                             onTap: () {
                               Navigator.of(context).pop(
                                 EpisodeSelection(
@@ -280,12 +284,14 @@ class _EpisodeRow extends StatelessWidget {
     required this.progress,
     required this.isCurrent,
     required this.onTap,
+    this.autofocus = false,
   });
 
   final Episode episode;
   final Map<String, dynamic>? progress;
   final bool isCurrent;
   final VoidCallback onTap;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -302,6 +308,7 @@ class _EpisodeRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppSpacing.x4),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppSpacing.x4),
+          autofocus: autofocus,
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.x3),
